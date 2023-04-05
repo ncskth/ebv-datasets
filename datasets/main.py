@@ -1,6 +1,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+import traceback
 from typing import List
 
 import torch
@@ -18,6 +19,9 @@ def superimpose_data(files, images, resolution, device):
     frames = frames[:, : resolution[0], : resolution[1]]
     # Permute to TCHW
     frames = frames.permute(0, 3, 2, 1)
+    # Normalize
+    images = images / images.max()
+    frames = frames / frames.max()
     return images + frames
 
 
@@ -44,7 +48,8 @@ def render_points(
                 device=device,
                 scale_change=True,
                 trans_change=True,
-                rotate_change=False,
+                rotate_change=True,
+                skew_change=True,
             )
             shapes.append(s)
             labels.append(l)
@@ -58,6 +63,7 @@ def render_points(
         torch.save(t, filename)
     except Exception as e:
         print(e)
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
@@ -74,8 +80,8 @@ if __name__ == "__main__":
     n = torch.arange(2000)
     threads = 12
     #ps = torch.linspace(0, 0.9, 10)
-    ps = [0.8]
-    resolution = (256, 256)
+    ps = [0.05, 0.1, 0.8]
+    resolution = (300, 300)
     device = "cuda"
     root_folder = Path(args.root)
     if not root_folder.exists():

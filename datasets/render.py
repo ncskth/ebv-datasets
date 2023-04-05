@@ -55,6 +55,8 @@ def skew_tensor(image, shear_angle, shear):
     skew_image = skew_image[0]
 
     non_zero_indices = torch.nonzero(skew_image)
+    if non_zero_indices.shape[0] == 0: # Allow for zero shear
+        return image
 
     x_min = torch.min(non_zero_indices[:, 0])
     y_min = torch.min(non_zero_indices[:, 1])
@@ -274,15 +276,23 @@ def render_shape_improved(
             resolution[1] - int(rotated_img.size()[1] * np.sqrt(2) / 2) - mask_r - 1,
         )
 
-        x_min = max(0, int(x.round() - rotated_img.size()[0] / 2))
-        x_max = min(resolution[0], int(x_min + rotated_img.size()[0]))
-        y_min = max(0, int(y.round() - rotated_img.size()[1] / 2))
-        y_max = min(resolution[1], int(y_min + rotated_img.size()[1]))
+        x_min = int(x.round() - rotated_img.size()[0] / 2)
+        x_min_cropped = max(0, x_min)
+        x_max = int(x_min + rotated_img.size()[0])
+        x_max_cropped = min(resolution[0], x_max)
+        y_min = int(y.round() - rotated_img.size()[1] / 2)
+        y_min_cropped = max(0, y_min)
+        y_max = int(y_min + rotated_img.size()[1])
+        y_max_cropped = min(resolution[1], y_max)
 
-        images[i, x_min:x_max, y_min:y_max] += rotated_img.bool()[
-            0 : x_min + x_max, 0 : y_min + y_max
+        images[
+            i, x_min_cropped:x_max_cropped, y_min_cropped:y_max_cropped
+        ] += rotated_img.bool()[
+            0 : x_min_cropped + x_max_cropped, 0 : y_min_cropped + y_max_cropped
         ]
-        labels[i] = torch.tensor([(x_min + x_max) // 2, (y_min + y_max) // 2])
+        labels[i] = torch.tensor(
+            [(x_min_cropped + x_max_cropped) // 2, (y_min_cropped + y_max_cropped) // 2]
+        )
 
     return images.unsqueeze(1).float(), labels.unsqueeze(1)
 
@@ -290,15 +300,16 @@ def render_shape_improved(
 if __name__ == "__main__":
     from shapes import *
 
-    render_shape_improved(
-        square_improved,
-        len=128,
-        resolution=(256, 256),
-        shape_p=0.8,
-        bg_noise_p=0.01,
-        device="cuda",
-        scale_change=False,
-        trans_change=False,
-        rotate_change=True,
-        skew_change=False,
-    )
+    for fn in [circle_improved, square_improved, triangle_improved]:
+        s, l = render_shape_improved(
+            fn,
+            len=128,
+            resolution=(300, 300),
+            shape_p=0.8,
+            bg_noise_p=0.002,
+            device="cuda",
+            scale_change=True,
+            trans_change=True,
+            rotate_change=True,
+            skew_change=True,
+        )
