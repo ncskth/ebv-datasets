@@ -268,11 +268,11 @@ def render_shape_improved(
         diameter = int(round(actual_diameter))
 
         x = x.clip(
-            int(rotated_img.size()[0] / 2) + mask_r,
+            int(rotated_img.size()[0] * np.sqrt(2) / 2) + mask_r,
             resolution[0] - int(rotated_img.size()[0] * np.sqrt(2) / 2) - mask_r - 1,
         )
         y = y.clip(
-            int(rotated_img.size()[1] / 2) + mask_r,
+            int(rotated_img.size()[1] * np.sqrt(2) / 2) + mask_r,
             resolution[1] - int(rotated_img.size()[1] * np.sqrt(2) / 2) - mask_r - 1,
         )
 
