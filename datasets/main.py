@@ -2,16 +2,29 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import traceback
-from typing import List
+from typing import List, NamedTuple, Optional
 
 import torch
 import tqdm
-from render import render_shape_improved
-from shapes import *
+from .render import render_shape_improved
+from .shapes import *
 
 
-def superimpose_data(files, images, resolution, device):
-    file = files[torch.randint(0, len(files), (1,)).item()]
+class DatasetParameters(NamedTuple):
+    resolution: torch.Size
+    density: float
+    bg_density: float
+    bg_files: Optional[List[str]] = None
+    device: str = "cuda"
+    length: int = 128
+
+    transformation: bool = False
+    scale: bool = False
+    rotate: bool = False
+    shear: bool = False
+
+
+def superimpose_data(file, images, resolution, device):
     _, _, frames, _, _, _, _ = torch.load(file, map_location=device)
     # Reduce polarity
     frames = frames.sum(-1, keepdim=True)
@@ -20,20 +33,12 @@ def superimpose_data(files, images, resolution, device):
     # Permute to TCHW
     frames = frames.permute(0, 3, 2, 1)
     # Normalize
-    images = images / images.max()
-    frames = frames / frames.max()
-    return images + frames
+    images = images.clip(0, 1)
+    frames = frames.clip(0, 1)
+    return (images + frames).clip(0, 1)
 
 
-def render_points(
-    output_folder,
-    index,
-    resolution,
-    p: float,
-    bg_p: float,
-    device: str,
-    bg_files: List[str] = None,
-):
+def render_points(output_folder, index, p: DatasetParameters):
     filename = output_folder / f"{index}.dat"
     try:
         shapes = []
@@ -41,25 +46,27 @@ def render_points(
         for fn in [circle_improved, square_improved, triangle_improved]:
             s, l = render_shape_improved(
                 fn,
-                len=128,
-                resolution=resolution,
-                shape_p=p,
-                bg_noise_p=bg_p,
-                device=device,
-                scale_change=True,
-                trans_change=True,
-                rotate_change=True,
-                skew_change=True,
+                len=p.length,
+                resolution=p.resolution,
+                shape_p=p.density,
+                bg_noise_p=p.bg_density,
+                device=p.device,
+                scale_change=p.scale,
+                trans_change=p.transformation,
+                rotate_change=p.rotate,
+                skew_change=p.shear,
             )
             shapes.append(s)
             labels.append(l)
 
         images = torch.stack(shapes).sum(0)
         labels = torch.stack(labels).permute(1, 0, 2, 3)
-        if bg_files is not None:
-            images = superimpose_data(bg_files, images, resolution, device)
+        if p.bg_files is not None:
+            images = superimpose_data(
+                p.bg_files[index % len(p.bg_files)], images, p.resolution, p.device
+            )
 
-        t = [images.to_sparse(), labels]
+        t = [images.clip(0, 1).to_sparse(), labels]
         torch.save(t, filename)
     except Exception as e:
         print(e)
@@ -75,12 +82,21 @@ if __name__ == "__main__":
         default=None,
         help="Location of dataset to use as background",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed to initialize random dataset mapping",
+    )
     args = parser.parse_args()
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
 
     n = torch.arange(2000)
     threads = 12
-    #ps = torch.linspace(0, 0.9, 10)
-    ps = [0.05, 0.1, 0.8]
+    # ps = torch.linspace(0, 0.9, 10)
+    ps = [0.01, 0.1, 0.2, 0.4, 0.8, 1.0]
     resolution = (300, 300)
     device = "cuda"
     root_folder = Path(args.root)
@@ -90,27 +106,36 @@ if __name__ == "__main__":
     bg_folder = Path(args.root_bg)
     if bg_folder.exists():
         bg_files = list(bg_folder.glob("*.dat"))
+        sorted(bg_files)
     else:
         bg_files = None
 
-    with tqdm.tqdm(total=len(ps) * n.numel()) as bar:
-        with ThreadPoolExecutor() as ex:
+    # Permutations of transformations
+    # transformation_combinations = torch.combinations(torch.tensor([1, 0]), 4, True)[:-1]
+    transformation_combinations = [torch.tensor([1, 0, 0, 0])]
+
+    with tqdm.tqdm(total=len(ps) * n.numel() * len(transformation_combinations)) as bar:
+        with ThreadPoolExecutor(max_workers=threads) as ex:
             futures = []
             for p in ps:
-                for i in n:
-                    output_folder = root_folder / f"{p:.1}"
-                    if not output_folder.exists():
-                        output_folder.mkdir()
-                    f = ex.submit(
-                        render_points,
-                        output_folder,
-                        i,
+                for comb in transformation_combinations:
+                    parameters = DatasetParameters(
                         resolution=resolution,
-                        p=p,
-                        bg_p=0.002,
-                        device=device,
-                        bg_files=bg_files,
+                        density=p,
+                        bg_density=0.005,
+                        transformation=comb[0],
+                        scale=comb[1],
+                        rotate=comb[2],
+                        shear=comb[3],
                     )
-                    futures.append(f)
+                    combination_name = (
+                        str(comb.tolist()).replace(", ", "").replace("True", "1")[1:-1]
+                    )
+                    output_folder = root_folder / f"{p:.1}-{combination_name}"
+                    for i in n:
+                        if not output_folder.exists():
+                            output_folder.mkdir()
+                        f = ex.submit(render_points, output_folder, i, parameters)
+                        futures.append(f)
             for f in as_completed(futures):
                 bar.update(1)

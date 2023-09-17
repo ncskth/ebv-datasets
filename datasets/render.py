@@ -32,7 +32,6 @@ def rotate_tensor(input, x):
 
 
 def skew_tensor(image, shear_angle, shear):
-
     pad = int(image.size()[0] * 2)
 
     y_shear = shear * math.sin(math.pi * shear * shear_angle / 180)
@@ -55,7 +54,7 @@ def skew_tensor(image, shear_angle, shear):
     skew_image = skew_image[0]
 
     non_zero_indices = torch.nonzero(skew_image)
-    if non_zero_indices.shape[0] == 0: # Allow for zero shear
+    if non_zero_indices.shape[0] == 0:  # Allow for zero shear
         return image
 
     x_min = torch.min(non_zero_indices[:, 0])
@@ -122,12 +121,13 @@ def render_shape_improved(
     # initialise starting x, y, diameter
     min_resolution = torch.as_tensor(min(resolution[0], resolution[1]))
     min_size = (0.08 * min_resolution).int().to(device)
-    max_size = (0.7 * min_resolution).int().to(device)
-    diameter = (
-        diameter
-        if diameter is not None
-        else torch.randint(low=min_size, high=max_size, size=(1,)).item()
-    )
+    max_size = (0.5 * min_resolution).int().to(device)
+    if diameter is not None:
+        diameter = diameter
+    elif scale_change:
+        diameter = torch.randint(low=min_size, high=max_size, size=(1,)).item()
+    else:
+        diameter = 100
     x = torch.randint(
         low=int(diameter / 2) + mask_r,
         high=resolution[0] - int(diameter / 2) - mask_r,
@@ -168,7 +168,6 @@ def render_shape_improved(
         shear_velocity = 2 * (torch.rand((1,), device=device) - 0.5)
 
     for i in range(images.shape[0]):
-
         x = x + velocity[0]
         y = y + velocity[1]
 
