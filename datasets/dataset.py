@@ -32,7 +32,9 @@ class ShapeDataset(torch.utils.data.Dataset):
 
     def _stack_frames(self, frames):
         if self.stack > 1:
-            offsets = [frames[:-self.stack + 1]] + [frames[x:self.t - self.stack + x + 1] for x in range(1, self.stack)]
+            offsets = [frames[: -self.stack + 1]] + [
+                frames[x : self.t - self.stack + x + 1] for x in range(1, self.stack)
+            ]
             return torch.stack(offsets, dim=1).squeeze()
         else:
             return frames
@@ -49,7 +51,11 @@ class ShapeDataset(torch.utils.data.Dataset):
         actual_tensor = frames[mid:end].float().clip(0, 1)
         delayed_poses = poses[mid + self.pose_delay : end + self.pose_delay]
         offset_poses = delayed_poses + self.pose_offset
-        return self._stack_frames(warmup_tensor), self._stack_frames(actual_tensor), offset_poses.squeeze()[self.stack - 1:]
+        return (
+            self._stack_frames(warmup_tensor),
+            self._stack_frames(actual_tensor),
+            offset_poses.squeeze()[self.stack - 1 :],
+        )
 
     def __len__(self):
         return len(self.files) * self.chunks
